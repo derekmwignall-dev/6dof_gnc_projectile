@@ -63,6 +63,26 @@ public:
 		return Vector3(cx, cy, cz);
 	}
 
+	double latitude() const // finds the latitude of a Vector3, which is the angle between the vector and the horizontal plane (x-y plane)
+	{
+		return std::atan2(m_z, std::sqrt(m_x * m_x + m_y * m_y)); // returns the angle in radians
+	}
+
+	double longitude() const // finds the longitude of a Vector3, which is the angle between the projection of the vector onto the horizontal plane and the x-axis
+	{
+		return std::atan2(m_y, m_x); // returns the angle in radians
+	}
+
+	double angleBetween(const Vector3& u) const // finds the angle between two Vector3's, which is calculated using the dot product and magnitudes of the vectors
+	{
+		double dot_product = this->dotP(u);
+		double mag_product = this->magnitude() * u.magnitude();
+		if (mag_product == 0.0)
+			return 0.0; // if either vector has zero magnitude, return 0 to avoid division by zero
+		double cos_angle = dot_product / mag_product;
+		return std::acos(cos_angle); // return the angle in radians
+	}
+
 	// extracts individual components of Vector3 
 	double getX() const { return m_x; }
 	double getY() const { return m_y; }

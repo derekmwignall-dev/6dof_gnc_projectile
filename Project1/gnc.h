@@ -1,7 +1,10 @@
 #pragma once
+
 #include "linalg.h"
 #include "motion.h"
 #include "integrator.h"
+#include "filters.h"
+#include <random>
 
 class Target {
 private:
@@ -48,19 +51,13 @@ public:
 	}
 
 	// computes the acceleration command for the projectile to intercept the target using proportional navigation guidance law
-	Vector3 computeAcceleration(const ProjectileMotion& p, const Target& t)
+	Vector3 computeAcceleration(const Vector9& filteredState)
 	{
-		Vector3 r_TM{ t.getPosition() - p.getPosition() };
-		Vector3 v_TM{ t.getVelocity() - p.getVelocity() };
-
-		double Vc{ -r_TM.normalize().dotP(v_TM) };
-
-		Vector3 los_unit{ r_TM.normalize() };
-		Vector3 los_rate_vec{ r_TM.crossP(v_TM) * (1.0 / (r_TM.magnitude() * r_TM.magnitude())) };
-
-		// Cross back with LOS unit vector to get lateral acceleration in the guidance plane
-		Vector3 accel{ los_rate_vec.crossP(los_unit) * (m_N * Vc) };
-		return accel;
+		Vector3 r{ filteredState.get(0), filteredState.get(1), filteredState.get(2) };
+		Vector3 v{ filteredState.get(3), filteredState.get(4), filteredState.get(5) };
+		double Vc{ -r.normalize().dotP(v) };
+		Vector3 los_rate{ r.crossP(v) * (1.0 / (r.magnitude() * r.magnitude())) };
+		return los_rate * (m_N * Vc);
 	}
 
 	double missDistance(const ProjectileMotion& p, const Target& t)
@@ -70,15 +67,37 @@ public:
 	}
 };
 
-class Navigation {
+class Sensor {
 private:
-	Guidance m_guidance; // instance of Guidance class to compute acceleration commands for the projectile based on the target's position and velocity
+	double m_sigma_pos{};
+	double m_sigma_vel{};
+	double m_sigma_acc{};
+	std::default_random_engine m_generator;
 public:
-	Navigation(double N) : m_guidance{ N } {}
-	// computes the acceleration command for the projectile to intercept the target using the Guidance class's computeAcceleration function, which implements the proportional navigation guidance law
-	Vector3 computeCommand(const ProjectileMotion& p, const Target& t) 
-	{
-		return m_guidance.computeAcceleration(p, t);
+	Sensor(double sigma_pos, double sigma_vel, double sigma_acc)
+		: m_sigma_pos{ sigma_pos }, m_sigma_vel{ sigma_vel }, m_sigma_acc{ sigma_acc } {
 	}
 
+	Vector9 measure(const ProjectileMotion& p, const Target& t)
+	{
+		std::normal_distribution<double> pos_noise(0.0, m_sigma_pos);
+		std::normal_distribution<double> vel_noise(0.0, m_sigma_vel);
+		std::normal_distribution<double> acc_noise(0.0, m_sigma_acc);
+
+		Vector3 r{ t.getPosition() - p.getPosition() };
+		Vector3 v{ t.getVelocity() - p.getVelocity() };
+		Vector3 a{ t.getAcceleration() };
+
+		return Vector9{
+			r.getX() + pos_noise(m_generator),
+			r.getY() + pos_noise(m_generator),
+			r.getZ() + pos_noise(m_generator),
+			v.getX() + vel_noise(m_generator),
+			v.getY() + vel_noise(m_generator),
+			v.getZ() + vel_noise(m_generator),
+			a.getX() + acc_noise(m_generator),
+			a.getY() + acc_noise(m_generator),
+			a.getZ() + acc_noise(m_generator)
+		};
+	}
 };

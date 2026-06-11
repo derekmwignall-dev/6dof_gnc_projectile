@@ -38,5 +38,14 @@
     <ClInclude Include="gnc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="filters.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="settings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="settings.cfg" />
   </ItemGroup>
 </Project>

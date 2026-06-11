@@ -147,10 +147,15 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="constants.h" />
+    <ClInclude Include="filters.h" />
     <ClInclude Include="gnc.h" />
     <ClInclude Include="math_func.h" />
     <ClInclude Include="motion.h" />
     <ClInclude Include="integrator.h" />
+    <ClInclude Include="settings.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="settings.cfg" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

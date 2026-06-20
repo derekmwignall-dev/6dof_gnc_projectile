@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="6DOF_gnc/6DOF_gnc.vcxproj" Id="e208d908-e7f3-4ba5-bd0f-45648834ca50" />
+</Solution>

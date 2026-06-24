@@ -1,46 +1,77 @@
 # 6DOF Ballistics Simulation
-
-A physics-based 6 degree-of-freedom ballistics simulation written in C++ with Python visualization. Built as a defense-sector portfolio project demonstrating numerical methods, rigid body dynamics, and guidance system fundamentals.
+A physics-based 6 degree-of-freedom ballistics simulation written in C++ with Python 
+visualization. Built as a defense-sector portfolio project demonstrating numerical methods, 
+rigid body dynamics, guidance system fundamentals, and state estimation.
 
 ## Current State
-
-The simulation models a projectile which moves towards a moving target based on the proportional navigation law. 
+The simulation models a short-range air-to-air engagement between a missile and a maneuvering aircraft target. The 
+missile homes using augmented proportional navigation guided by a 9-state Kalman filter 
+fusing noisy radar measurements of absolute target state.
 
 ### Physics Implemented
-- **Translational dynamics** -- gravity, aerodynamic drag, Lorentz force (charged projectile in E/B fields)
-- **Rotational dynamics** -- torque-driven attitude propagation via quaternion integration
-- **Inertia tensor** -- geometry-based computation for sphere, cube, and cylinder primitives
-- **Numerical integration** -- RK4 with consistent force evaluation at each sub-step
-- **Sensor noise** -- Adds randomized noise to the position, velocity, and acceleration to simulate real-world radar noise
-- **Kalman Filter** -- 3-state Kalman Filter acting as the noise filter in the current homing loop
+- **Translational dynamics** — gravity, aerodynamic drag, lift (AoA-dependent), 
+  Lorentz force (charged projectile in E/B fields)
+- **Rotational dynamics** — torque-driven attitude propagation via quaternion integration
+- **Inertia tensor** — geometry-based computation for sphere and cylinder primitives
+- **Numerical integration** — RK4 with consistent force evaluation at each sub-step
+- **Atmosphere model** — ISA density approximation as a function of altitude, used in 
+  drag and lift force calculations
+- **RCS modeling** — aspect-angle-dependent cylindrical RCS with Swerling 2 
+  chi-squared fluctuation model
+- **Sensor noise** — SNR-derived position, velocity, and acceleration noise sigma computed 
+  from radar range equation; noise tightens automatically as range closes
+
+### Guidance, Navigation & Control
+- **Guidance law** — Zero-Effort Miss augmented proportional navigation (ZEM-APN) with 
+  gravity bias correction and guidance command saturation
+- **Kalman filter** — 9-state linear filter tracking absolute target position, velocity, 
+  and acceleration in the inertial frame; dynamic R matrix updated each step from 
+  instantaneous SNR; Q tuned to allow rapid convergence on maneuvering target acceleration
+- **Autopilot** — PD attitude controller driving body axis toward guidance-commanded 
+  direction; separate speed controller maintaining commanded velocity against drag
 
 ### Architecture
 ```
-settings.cfg    -- Settings file for initial conditions
-settings.h      -- Allows for initial conditions from .cfg file to be sent into main.cpp
-constants.h     -- physical constants (gravity, air density, speed of light, pi)
-linalg.h        -- Vector3, Matrix3x3, Quaternion with full operator support
-math_func.h     -- TaylorExpansion<N> template class
-motion.h        -- ProjectileMotion, Forces, Inertia namespace
-integrator.h    -- rk4Step() for full 6DOF state propagation
-gnc.h           -- Target, Guidance, Sensor classes
-filter.h        -- Kalman filter class
-main.cpp        -- simulation loop with CSV output
-visualize.py    -- 3D trajectory + quaternion components + Euler angles
+settings.cfg     — Engagement initial conditions and sensor/autopilot parameters
+settings.h       — Config file parser; derives Kalman matrices (X0, P0, Q, R)
+constants.h      — Physical constants
+linalg.h         — Vector3, Vector9, Matrix3x3, Matrix9x9, Quaternion
+motion.h         — ProjectileMotion, Forces, Inertia namespace
+integrator.h     — rk4Step() for full 6DOF state propagation
+gnc.h            — Target, Guidance (ZEM-APN), Autopilot classes
+filters.h        — 9-state Kalman filter with predict/update cycle and dynamic R
+radar.h          — RCSModel (cylindrical + Swerling 2), Seeker (radar equation,
+                    SNR-derived noise, absolute-frame measurement)
+runsimulation.h  — Simulation loop with dynamic R update, closest-approach
+                    detection, and optional CSV logging
+montecarlo.h     — Monte Carlo dispersion analysis with configurable position
+                    and velocity perturbations
+main.cpp         — Entry point; single run or Monte Carlo mode
+visualize.py     — 3D trajectory + orientation visualization
 ```
 
 ### Key Technical Features
-- Quaternion-based attitude representation -- no gimbal lock
+- Quaternion-based attitude representation — no gimbal lock
 - Templated Taylor expansion for compile-time series evaluation
 - RK4 force evaluation at all four stages for both translational and rotational state
-- CSV output with full state vector (position + quaternion) for post-processing
-- Settings file for easy situation set-ups
-- Proportional navigation guidance law
-- Kalman filter state estimator with randomized noise
+- 9-state Kalman filter tracking absolute target position/velocity/acceleration; 
+  seeker and filter share a consistent inertial coordinate frame
+- Dynamic measurement noise covariance R updated each timestep from radar range 
+  equation SNR — filter automatically increases trust in measurements as range closes
+- ZEM-APN guidance with gravity compensation term preventing ballistic trajectory 
+  drift over engagement duration
+- Guidance command magnitude saturation preventing autopilot saturation on initial 
+  large-angle intercept geometries
+- SNR-derived seeker noise model coupling radar parameters (power, gain, wavelength, 
+  bandwidth, noise figure) to Kalman filter measurement uncertainty
+- Swerling 2 RCS fluctuation model on cylindrical target geometry
+- Monte Carlo CEP analysis with configurable launch dispersion
+- Settings file for rapid engagement reconfiguration
 
 ## In Progress
-- Monte Carlo dispersion analysis
-- Augmented/optimal proportional navigation
+- Autopilot bandwidth tuning for high-initial-angle engagements
+- t_go refinement via Newton iteration accounting for target acceleration
+- Full Monte Carlo validation against CEP threshold
 
 ## Build
 Requires a C++17 compiler. Open in Visual Studio or compile with:
@@ -56,11 +87,16 @@ python visualize.py
 Place `visualize.py` in the same directory as `trajectory.csv` generated by the simulation.
 
 ## Planned Extensions
-- Moving and evasive target engagement
-- Radar cross section (RCS) modeling
-- Monte Carlo CEP analysis
+- Nautical/maritime INS-GNSS integrated navigator (surface vessel or AUV)
+- Extended Kalman filter with polar measurement model (range/angle rather than 
+  Cartesian position) for improved terminal accuracy
 - Special relativistic corrections at high velocity
+- Multiple simultaneous target engagement
 
 ## Sources
-- Zarchan, P. (2019) *Tactical and strategic missile guidance* (2 vols). 7th edn. Reston, VA: American Institute of Aeronatucs and Astronautics, Inc.
-- Zarchan, P. and Musoff, H. (2015) *Fundamentals of kalman filtering: A practical approach.* 4th edn. Reston, VA: American Institute of Aeronautics and Astronautics. 
+- Zarchan, P. (2019). *Tactical and Strategic Missile Guidance* (7th ed.). 
+  American Institute of Aeronautics and Astronautics.
+- Zarchan, P. and Musoff, H. (2015). *Fundamentals of Kalman Filtering: A Practical 
+  Approach* (4th ed.). American Institute of Aeronautics and Astronautics.
+- Groves, P. D. (2013). *Principles of GNSS, Inertial, and Multisensor Integrated 
+  Navigation Systems* (2nd ed.). Artech House.

@@ -149,6 +149,7 @@
     <ClInclude Include="gnc.h" />
     <ClInclude Include="integrator.h" />
     <ClInclude Include="linalg.h" />
+    <ClInclude Include="linalg_mxn.h" />
     <ClInclude Include="math_func.h" />
     <ClInclude Include="montecarlo.h" />
     <ClInclude Include="motion.h" />

@@ -16,6 +16,8 @@ public:
 	RCSModel(double wavelength, double radius, double length)
 		: m_wavelength{ wavelength }, m_radius{ radius }, m_length{ length } {
 	}
+
+
 	double computeRCScylinder(double aspect_angle, bool average) const // Compute baseline cross section for a cylinder
 	{
 		double rcs_broad{ 2*Constants::pi * m_radius * m_length * m_length / m_wavelength };
@@ -55,6 +57,12 @@ public:
 		// apply Swerling 2 fluctuation
 		return applySwerling2(geometric_rcs);
 	}
+
+    double computeAverageRCS() const
+    {
+        return computeRCScylinder(0.0, true); // average flag = true
+    }
+
 };
 
 
@@ -94,7 +102,7 @@ public:
         return range / std::sqrt(2.0 * snr_clamped);
     }
 
-    Vector9 measure(const ProjectileMotion& p, const Target& t) const
+    Vector3 measure(const ProjectileMotion& p, const Target& t) const
     {
         // compute RCS at current aspect angle
         double rcs{ m_rcs.compute(p.getPosition(), t.getPosition(),
@@ -110,28 +118,16 @@ public:
 
         // guard against invalid sigma values
         sigma_pos = std::max(sigma_pos, 0.01);  // minimum 0.01 ft
-        double sigma_vel{ std::max(sigma_pos / 10.0,  0.001) };
-        double sigma_acc{ std::max(sigma_pos / 100.0, 0.0001) };
 
         // generate noisy measurement
         std::normal_distribution<double> pos_noise(0.0, sigma_pos);
-        std::normal_distribution<double> vel_noise(0.0, sigma_vel);
-        std::normal_distribution<double> acc_noise(0.0, sigma_acc);
 
-        Vector3 r{ t.getPosition() - p.getPosition() };
-        Vector3 v{ t.getVelocity() - p.getVelocity() };
-        Vector3 a{ t.getAcceleration() };
+        Vector3 r{ t.getPosition() };
 
-        return Vector9{
+        return Vector3{
             r.getX() + pos_noise(m_generator),
             r.getY() + pos_noise(m_generator),
-            r.getZ() + pos_noise(m_generator),
-            v.getX() + vel_noise(m_generator),
-            v.getY() + vel_noise(m_generator),
-            v.getZ() + vel_noise(m_generator),
-            a.getX() + acc_noise(m_generator),
-            a.getY() + acc_noise(m_generator),
-            a.getZ() + acc_noise(m_generator)
+            r.getZ() + pos_noise(m_generator)
         };
     }
 };

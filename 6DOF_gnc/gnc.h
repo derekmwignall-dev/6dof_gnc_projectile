@@ -52,6 +52,7 @@ public:
 class Guidance {
 private: 
 	const double m_N{ 3.0 }; // navigation constant for proportional navigation
+	Vector3 m_aT_smoothed{};
 public:
 	Guidance(const double N) : m_N{ N } {} // constructor to set navigation constant, with default value of 3.0
 	Guidance() = default; // default constructor to allow for default navigation constant
@@ -68,20 +69,30 @@ public:
 	}
 
 	// computes the acceleration command for the projectile to intercept the target using ZEM-based augmented proportional navigation guidance law
-	Vector3 computeAcceleration(const Vector9& filteredState)
+	Vector3 computeAcceleration(const Vector9& filteredState,
+		const Vector3& missilePos,
+		const Vector3& missileVel)
 	{
-		Vector3 r{ filteredState.get(0), filteredState.get(1), filteredState.get(2) };
-		Vector3 v{ filteredState.get(3), filteredState.get(4), filteredState.get(5) };
+		Vector3 tgt_pos{ filteredState.get(0), filteredState.get(1), filteredState.get(2) };
+		Vector3 tgt_vel{ filteredState.get(3), filteredState.get(4), filteredState.get(5) };
 		Vector3 a_T{ filteredState.get(6), filteredState.get(7), filteredState.get(8) };
+
+		Vector3 r{ tgt_pos - missilePos };
+		Vector3 v{ tgt_vel - missileVel };
 
 		double Vc{ -r.normalize().dotP(v) };
 		if (Vc <= 0.0) return Vector3{ 0.0, 0.0, 0.0 };
 
 		double t_go{ r.magnitude() / Vc };
-		if (t_go < 0.05) return Vector3{ 0.0, 0.0, 0.0 };
+		//if (t_go < 0.3) return Vector3{ 0.0, 0.0, 0.0 };
 
-		// ZEM with target acceleration
-		Vector3 ZEM{ r + v * t_go + a_T * (0.5 * t_go * t_go) };
+		// Gravity vector in inertial frame
+		Vector3 gravity{ 0.0, 0.0, -Constants::gravity };
+		double alpha = 0.05;  // smoothing factor (small = slow/stable)
+
+		m_aT_smoothed = m_aT_smoothed * (1.0 - alpha) + a_T * alpha;
+		Vector3 ZEM{ r + v * t_go + m_aT_smoothed * (0.5 * t_go * t_go) 
+					- gravity * (0.5 * t_go * t_go) };
 
 		return ZEM * (m_N / (t_go * t_go));
 	}
@@ -106,21 +117,17 @@ public:
 	Autopilot(double Kp_att, double Kp_spd, double Kd_att, double V_cmd, double thrust_max)
 		: m_Kp_att{ Kp_att }, m_Kp_spd{ Kp_spd }, m_Kd_att{ Kd_att }, m_V_cmd{ V_cmd }, m_thrust_max{ thrust_max } {}
 
-	Vector3 attitudeCommand(const ProjectileMotion& p, const Vector3& nC) // What we want the projectile to do
+	Vector3 attitudeCommand(const ProjectileMotion& p, const Vector3& nC)
 	{
-		// desired acceleration = guidance command + gravity compensation
-		Vector3 desired_accel{ nC + Vector3{ 0.0, 0.0, Constants::gravity } };
+		// nC already contains gravity compensation from guidance
+		// do NOT add gravity here — it causes double-correction
+		Vector3 desired_dir{ nC.normalize() };
+		if (nC.magnitude() < 1e-10)
+			desired_dir = p.getVelocity().normalize();
 
-		// desired pointing direction
-		Vector3 desired_dir{ desired_accel.normalize() };
-		if (desired_accel.magnitude() < 1e-10)
-			desired_dir = p.getVelocity().normalize(); // default to velocity direction
-
-		// current body axis
 		Vector3 body_axis{ 1.0, 0.0, 0.0 };
 		Vector3 current_dir{ p.getOrientation().rotate(body_axis) };
 
-		// pointing error
 		Vector3 error{ current_dir.crossP(desired_dir) };
 		Vector3 omega{ p.getAngularVelocity() };
 

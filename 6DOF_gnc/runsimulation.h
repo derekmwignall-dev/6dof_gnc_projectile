@@ -8,6 +8,7 @@
 #include "filters.h"
 #include "settings.h"
 #include "radar.h"
+#include "linalg_mxn.h"
 
 struct SimResult {
     double missDistance{};
@@ -23,7 +24,9 @@ SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
 
     Vector3 E{ 0.0, 0.0, 0.0 };
     Vector3 B{ 0.0, 0.0, 0.0 };
-    Matrix9x9 H{};
+    Matrix3x9 H{ Vector9(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), 
+                 Vector9(0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                 Vector9(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)};
     double maxNC{ 0.0 };
     double prevRange{ std::numeric_limits<double>::max() };
 
@@ -65,15 +68,45 @@ SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
     {
         t += dt;
 
-        Vector9 measurement{ seeker.measure(projectile, target) };
+        Vector3 measurement{ seeker.measure(projectile, target) };
+
+        // Update R from current SNR
+        Vector3 r_TM_pre{ target.getPosition() - projectile.getPosition() };
+        double range_pre{ r_TM_pre.magnitude() };
+        double rcs_now{ rcs.computeAverageRCS() };
+        double snr_now{ seeker.computeSNR(rcs_now, range_pre) };
+        double sp{ std::max(seeker.computeNoiseSigma(snr_now, range_pre), 0.01) };
+
+        Matrix3x3 R_k{ Vector3(sp*sp,0,0), 
+                       Vector3(0,sp*sp,0), 
+                       Vector3(0,0,sp*sp) };
+        kalman.setR(R_k);
+
         kalman.predict(dt);
         kalman.update(measurement);
         Vector9 x_hat{ kalman.getState() };
 
-        Vector3 nC{ guidance.computeAcceleration(x_hat) };
+        Vector3 nC{ guidance.computeAcceleration(x_hat,
+                                          projectile.getPosition(),
+                                          projectile.getVelocity()) };
+
+        // After computing nC, decompose into:
+        // - Axial component (along missile velocity): handled by thrust as-is
+        // - Lateral component: apply directly as a lateral force
+        Vector3 vel_hat = projectile.getVelocity().normalize();
+        Vector3 nC_axial = vel_hat * vel_hat.dotP(nC);
+        Vector3 nC_lateral = nC - nC_axial;
+
+        // Apply lateral guidance demand as a direct force (fin model)
+        double maxLatG = 30.0 * Constants::gravity;  // structural limit
+        if (nC_lateral.magnitude() > maxLatG)
+            nC_lateral = nC_lateral.normalize() * maxLatG;
+        
+
         Vector3 alpha_cmd{ autopilot.attitudeCommand(projectile, nC) };
         Vector3 f_thrust{ autopilot.thrustForce(projectile, forces) };
-        Vector3 f_total{ f_thrust };
+        Vector3 f_lateral = nC_lateral * forces.getMass();
+        Vector3 f_total = f_thrust + f_lateral;  // was just f_thrust
         Vector3 r_world{ projectile.getOrientation().rotate(cfg.leverArm) };
 
         rk4Step(projectile, forces, E, B, dt, r_world, f_total, f_thrust, alpha_cmd);
@@ -87,8 +120,7 @@ SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
         double  range{ r_TM.magnitude() };
 
         // Closest approach detection
-        if (range > prevRange)
-        {
+        if (range > prevRange) {
             result.missDistance = prevRange;
             result.interceptTime = t;
             result.hit = prevRange < 10.0;
@@ -96,7 +128,7 @@ SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
         }
         prevRange = range;
 
-        if (range < 100) dt = dt0 / 10;
+        if (range < 1000) dt = dt0 / 10;
         else             dt = dt0;
 
         // Log only if enabled

@@ -42,7 +42,7 @@ struct SimConfig {
     Vector9 kalmanX0;     // initial Kalman state [relPos, relVel, targetAcc]
     Matrix9x9 kalmanP0;   // initial covariance
     Matrix9x9 kalmanQ;    // process noise
-    Matrix9x9 kalmanR;    // measurement noise
+    Matrix3x3 kalmanR;    // measurement noise
     double sensorSigmaPos;
     double sensorSigmaVel;
     double sensorSigmaAcc;
@@ -102,11 +102,10 @@ struct SimConfig {
     void derive()
     {
 		crossSec = diameter * diameter / 4 * Constants::pi;
-        relPos = targetPos - missilePos;
-        relVel = targetVel - missileVel;
+        
         kalmanX0 = Vector9{
-            relPos.getX(), relPos.getY(), relPos.getZ(),
-            relVel.getX(), relVel.getY(), relVel.getZ(),
+            targetPos.getX(), targetPos.getY(), targetPos.getZ(),
+            targetVel.getX(), targetVel.getY(), targetVel.getZ(),
             targetAcc.getX(), targetAcc.getY(), targetAcc.getZ()
         };
 
@@ -114,11 +113,29 @@ struct SimConfig {
         double sp2{ sensorSigmaPos * sensorSigmaPos };
         double sv2{ sensorSigmaVel * sensorSigmaVel };
         double sa2{ sensorSigmaAcc * sensorSigmaAcc };
-        double compQ{ sa2 * dt };
+        //double compQ{ sa2 * dt };
         // Set initial Kalman filter matrices
         kalmanP0 = Matrix9x9::diagonal(sp2, sp2, sp2, sv2, sv2, sv2, sa2, sa2, sa2);
-        kalmanQ = Matrix9x9::diagonal(0, 0, 0, 0, 0, 0, compQ, compQ, compQ);
-        kalmanR = Matrix9x9::diagonal(sp2, sp2, sp2, sv2, sv2, sv2, sa2, sa2, sa2);
+        kalmanR = Matrix3x3{ Vector3(sp2, 0, 0),
+                             Vector3(0, sp2, 0),
+                             Vector3(0, 0, sp2) };
+
+        double Sa{ 2500.0 };  // ft²/s⁴ 
+        double dt5{ dt * dt * dt * dt * dt / 20.0 };
+        double dt3v{ dt * dt * dt / 3.0 };
+        double dt4{ dt * dt * dt * dt / 8.0 };
+        double dt3{ dt * dt * dt / 6.0 };
+        double dt2{ dt * dt / 2.0 };
+
+        kalmanQ = { Matrix9x9{Vector9(dt5, 0.0, 0.0,  dt4, 0.0, 0.0,  dt3, 0.0, 0.0),
+                              Vector9(0.0, dt5, 0.0,  0.0, dt4, 0.0,  0.0, dt3, 0.0),
+                              Vector9(0.0, 0.0, dt5,  0.0, 0.0, dt4,  0.0, 0.0, dt3),
+                              Vector9(dt4, 0.0, 0.0,  dt3v,0.0, 0.0,  dt2, 0.0, 0.0),
+                              Vector9(0.0, dt4, 0.0,  0.0, dt3v,0.0,  0.0, dt2, 0.0),
+                              Vector9(0.0, 0.0, dt4,  0.0, 0.0, dt3v, 0.0, 0.0, dt2),
+                              Vector9(dt3, 0.0, 0.0,  dt2, 0.0, 0.0,  dt,  0.0, 0.0),
+                              Vector9(0.0, dt3, 0.0,  0.0, dt2, 0.0,  0.0, dt,  0.0),
+                              Vector9(0.0, 0.0, dt3,  0.0, 0.0, dt2,  0.0, 0.0, dt) } * Sa };
 
         inertiaTensor = Inertia::cylinder(weight / Constants::gravity, diameter / 2, length);
         leverArm = Vector3{ length/2.0, 0.0, 0.0 };

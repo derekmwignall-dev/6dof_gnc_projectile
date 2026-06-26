@@ -14,7 +14,7 @@ private:
 	int m_runs{};
 	double m_sigma_pos{};
 	double m_sigma_vel{};
-	std::default_random_engine m_generator;
+	std::default_random_engine m_generator{ std::random_device{}() };
 	std::vector<SimResult> m_results{}; // stores all run results
 
 public:

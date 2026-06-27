@@ -14,8 +14,8 @@ struct SimResult {
     double missDistance{};
     double interceptTime{};
     bool hit{ false };
-	Vector3 initialPos{};  // perturbed initial position
-	Vector3 initialVel{};  // perturbed initial velocity
+    Vector3 initialPos{};  // perturbed initial position
+    Vector3 initialVel{};  // perturbed initial velocity
 };
 
 SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
@@ -24,9 +24,9 @@ SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
 
     Vector3 E{ 0.0, 0.0, 0.0 };
     Vector3 B{ 0.0, 0.0, 0.0 };
-    Matrix3x9 H{ Vector9(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), 
+    Matrix3x9 H{ Vector9(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
                  Vector9(0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-                 Vector9(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)};
+                 Vector9(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) };
     double maxNC{ 0.0 };
     double prevRange{ std::numeric_limits<double>::max() };
 
@@ -61,34 +61,34 @@ SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
     if (logToFile)
     {
         outFile.open("trajectory.csv");
-        outFile << "t,x,y,z,qw,qx,qy,qz,tx,ty,tz,Vc,range,nCx,nCy,nCz,ox,oy,oz\n";
+        outFile << "t,x,y,z,qw,qx,qy,qz,tx,ty,tz,ktx,kty,ktz,Vc,range,nCx,nCy,nCz,tvx,tvy,tvz,ktvx,ktvy,ktvz,ox,oy,oz,innov_x,innov_y,innov_z,nees\n";
     }
     std::cout << "Starting simulation, numSteps=" << cfg.numSteps << " dt=" << dt << "\n";
     for (int step{ 0 }; step < cfg.numSteps; ++step)
     {
         t += dt;
 
-        Vector3 measurement{ seeker.measure(projectile, target) };
+        SeekerMeasurement meas{ seeker.measure(projectile, target) };
 
-        // Update R from current SNR
-        Vector3 r_TM_pre{ target.getPosition() - projectile.getPosition() };
-        double range_pre{ r_TM_pre.magnitude() };
-        double rcs_now{ rcs.computeAverageRCS() };
-        double snr_now{ seeker.computeSNR(rcs_now, range_pre) };
-        double sp{ std::max(seeker.computeNoiseSigma(snr_now, range_pre), 0.01) };
-
-        Matrix3x3 R_k{ Vector3(sp*sp,0,0), 
-                       Vector3(0,sp*sp,0), 
-                       Vector3(0,0,sp*sp) };
+        double sp{ meas.sigma };
+        Matrix3x3 R_k{ Vector3(sp * sp, 0, 0),
+                       Vector3(0, sp * sp, 0),
+                       Vector3(0, 0, sp * sp) };
         kalman.setR(R_k);
 
         kalman.predict(dt);
-        kalman.update(measurement);
+        kalman.update(meas.position);
+
         Vector9 x_hat{ kalman.getState() };
+        Vector3 innov{ kalman.getInnovation() };  // y = z - H*x⁻  (pre-fit residual)
 
         Vector3 nC{ guidance.computeAcceleration(x_hat,
                                           projectile.getPosition(),
                                           projectile.getVelocity()) };
+
+        double maxG = 30.0 * Constants::gravity;  // structural limit
+        if (nC.magnitude() > maxG)
+            nC = nC.normalize() * maxG;
 
         // After computing nC, decompose into:
         // - Axial component (along missile velocity): handled by thrust as-is
@@ -96,12 +96,6 @@ SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
         Vector3 vel_hat = projectile.getVelocity().normalize();
         Vector3 nC_axial = vel_hat * vel_hat.dotP(nC);
         Vector3 nC_lateral = nC - nC_axial;
-
-        // Apply lateral guidance demand as a direct force (fin model)
-        double maxLatG = 30.0 * Constants::gravity;  // structural limit
-        if (nC_lateral.magnitude() > maxLatG)
-            nC_lateral = nC_lateral.normalize() * maxLatG;
-        
 
         Vector3 alpha_cmd{ autopilot.attitudeCommand(projectile, nC) };
         Vector3 f_thrust{ autopilot.thrustForce(projectile, forces) };
@@ -128,8 +122,6 @@ SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
         }
         prevRange = range;
 
-        if (range < 1000) dt = dt0 / 10;
-        else             dt = dt0;
 
         // Log only if enabled
         if (logToFile)
@@ -138,12 +130,24 @@ SimResult runSimulation(const SimConfig& cfg, bool logToFile = false)
             Quaternion orient{ projectile.getOrientation() };
             Vector3    current_dir{ orient.rotate(Vector3{1,0,0}) };
             Vector3    tar{ target.getPosition() };
+            Vector3    tacc{ target.getAcceleration() };
+            Vector3    kTar{ x_hat.getX1(), x_hat.getX2(), x_hat.getX3() };Vector3    tvel{ target.getVelocity() };
+            Vector3    kTvel{ x_hat.getX4(), x_hat.getX5(), x_hat.getX6() };
+            
+            Vector9    tar_state{ tar.getX(), tar.getY(), tar.getZ(), tvel.getX(), tvel.getY(), tvel.getZ(), tacc.getX(), tacc.getY(), tacc.getZ() };
+            double     nees{ kalman.computeNEES(tar_state) };
+
             outFile << t << "," << pos.getX() << "," << pos.getY() << "," << pos.getZ() << ","
                 << orient.getW() << "," << orient.getX() << "," << orient.getY() << "," << orient.getZ() << ","
                 << tar.getX() << "," << tar.getY() << "," << tar.getZ() << ","
+                << kTar.getX() << "," << kTar.getY() << "," << kTar.getZ() << ","
                 << Vc << "," << range << ","
                 << nC.getX() << "," << nC.getY() << "," << nC.getZ() << ","
-                << current_dir.getX() << "," << current_dir.getY() << "," << current_dir.getZ() << "\n";
+                << tvel.getX() << "," << tvel.getY() << "," << tvel.getZ() << ","
+                << kTvel.getX() << "," << kTvel.getY() << "," << kTvel.getZ() << ","
+                << current_dir.getX() << "," << current_dir.getY() << "," << current_dir.getZ() << ","
+                << innov.getX() << "," << innov.getY() << "," << innov.getZ() << ","
+                << nees << "\n";
         }
     }
 

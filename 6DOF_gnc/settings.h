@@ -120,7 +120,7 @@ struct SimConfig {
                              Vector3(0, sp2, 0),
                              Vector3(0, 0, sp2) };
 
-        double Sa{ 2500.0 };  // ft²/s⁴ 
+        double Sa{ 100.0 };  // ft²/s⁴ 
         double dt5{ dt * dt * dt * dt * dt / 20.0 };
         double dt3v{ dt * dt * dt / 3.0 };
         double dt4{ dt * dt * dt * dt / 8.0 };

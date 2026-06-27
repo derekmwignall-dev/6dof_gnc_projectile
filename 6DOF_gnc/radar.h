@@ -6,6 +6,11 @@
 #include "motion.h"
 #include "gnc.h"
 
+struct SeekerMeasurement {
+    Vector3 position;
+    double  sigma;
+};
+
 class RCSModel {
 private:
 	double m_wavelength{};
@@ -75,6 +80,7 @@ private:
     double m_bandwidth{};    // receiver bandwidth (Hz)
     double m_noise_fig{};    // noise figure (linear, not dB)
     double m_noise_temp{};   // system noise temperature (K)
+    double m_beamwidth{};    // antenna beamwidth (radians), derived from gain
     RCSModel m_rcs;
     mutable std::default_random_engine m_generator;
 
@@ -83,7 +89,7 @@ public:
         double noise_fig, double noise_temp, const RCSModel& rcs)
         : m_power{ power }, m_gain{ gain }, m_wavelength{ wavelength },
         m_bandwidth{ bandwidth }, m_noise_fig{ noise_fig },
-        m_noise_temp{ noise_temp }, m_rcs{ rcs } {
+        m_noise_temp{ noise_temp }, m_rcs{ rcs }, m_beamwidth{ Constants::pi / std::sqrt(m_gain / 0.6) } {
     }
 
     double computeSNR(double rcs, double range) const
@@ -96,38 +102,68 @@ public:
         return P_r / P_n;
     }
 
-    double computeNoiseSigma(double snr, double range) const
+    // Range sigma: derived from bandwidth and SNR (SI internally, output in ft)
+    double sigmaRange(double snr) const
     {
-        double snr_clamped{ std::max(snr, 0.01) }; // minimum SNR floor
-        return range / std::sqrt(2.0 * snr_clamped);
+        double snr_clamped{ std::max(snr, 0.01) };
+        double c_ft{ 9.836e8 };  // speed of light in ft/s
+        return c_ft / (2.0 * m_bandwidth * std::sqrt(2.0 * snr_clamped));
     }
 
-    Vector3 measure(const ProjectileMotion& p, const Target& t) const
+    // Cross-range sigma: derived from beamwidth, range, SNR (monopulse)
+    double sigmaAngle(double snr) const
     {
-        // compute RCS at current aspect angle
-        double rcs{ m_rcs.compute(p.getPosition(), t.getPosition(),
-                                     t.getOrientation()) };
+        double snr_clamped{ std::max(snr, 0.01) };
+        return m_beamwidth / (1.6 * std::sqrt(snr_clamped));
+    }
 
-        // compute range
+    SeekerMeasurement measure(const ProjectileMotion& p, const Target& t) const
+    {
+        double rcs{ m_rcs.compute(p.getPosition(), t.getPosition(), t.getOrientation()) };
+
         Vector3 r_TM{ t.getPosition() - p.getPosition() };
         double  range{ r_TM.magnitude() };
 
-        // compute SNR and noise sigma
-        double snr{ computeSNR(rcs, range) };
-        double sigma_pos{ computeNoiseSigma(snr, range) };
+        // Convert RCS ft² -> m² for SNR (radar eq uses SI)
+        double rcs_m2{ rcs / (3.28084 * 3.28084) };
+        double range_m{ range / 3.28084 };
+        double P_n{ Constants::k * m_noise_temp * m_bandwidth * m_noise_fig };
+        double lam_m{ m_wavelength / 3.28084 };
+        double P_r{ m_power * m_gain * m_gain * lam_m * lam_m * rcs_m2 /
+                    (std::pow(4.0 * Constants::pi, 3.0) * std::pow(range_m, 4.0)) };
+        double snr{ P_r / P_n };
 
-        // guard against invalid sigma values
-        sigma_pos = std::max(sigma_pos, 0.01);  // minimum 0.01 ft
+        // Physically correct sigmas
+        double sr{ std::max(sigmaRange(snr), 0.01) };   // along LOS (range)
+        double sc{ std::max(range * sigmaAngle(snr), 0.01) }; // cross-range
 
-        // generate noisy measurement
-        std::normal_distribution<double> pos_noise(0.0, sigma_pos);
+        // LOS unit vector and two perpendicular axes for noise decomposition
+        Vector3 los{ r_TM.normalize() };
 
-        Vector3 r{ t.getPosition() };
+        // Build perpendicular axes to LOS
+        Vector3 ref{ std::abs(los.getX()) < 0.9 ? Vector3{1,0,0} : Vector3{0,1,0} };
+        Vector3 perp1{ los.crossP(ref).normalize() };
+        Vector3 perp2{ los.crossP(perp1).normalize() };
 
-        return Vector3{
-            r.getX() + pos_noise(m_generator),
-            r.getY() + pos_noise(m_generator),
-            r.getZ() + pos_noise(m_generator)
+        std::normal_distribution<double> range_noise(0.0, sr);
+        std::normal_distribution<double> cross_noise(0.0, sc);
+
+        // Noise along LOS (range error) and perpendicular (angle errors)
+        double nr{ range_noise(m_generator) };
+        double nc1{ cross_noise(m_generator) };
+        double nc2{ cross_noise(m_generator) };
+
+        Vector3 pos_true{ t.getPosition() };
+        Vector3 pos_noisy{
+            pos_true.getX() + los.getX() * nr + perp1.getX() * nc1 + perp2.getX() * nc2,
+            pos_true.getY() + los.getY() * nr + perp1.getY() * nc1 + perp2.getY() * nc2,
+            pos_true.getZ() + los.getZ() * nr + perp1.getZ() * nc1 + perp2.getZ() * nc2
         };
+
+        // Representative scalar sigma for R (geometric mean of range and cross-range)
+        double sigma_rep{ std::sqrt((sr * sr + sc * sc + sc * sc) / 3.0) };
+
+        return SeekerMeasurement{ pos_noisy, sigma_rep };
     }
 };
+

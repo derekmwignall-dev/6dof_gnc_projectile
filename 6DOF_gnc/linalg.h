@@ -338,6 +338,7 @@ public:
 		return Vector9(m_x1 + u.m_x1, m_x2 + u.m_x2, m_x3 + u.m_x3, m_x4 + u.m_x4, m_x5 + u.m_x5, m_x6 + u.m_x6, m_x7 + u.m_x7, m_x8 + u.m_x8, m_x9 + u.m_x9);
 	}
 
+
 	constexpr Vector9 operator-(const Vector9& u) const // subtracts 2 Vector9's
 	{
 		return Vector9(m_x1 - u.m_x1, m_x2 - u.m_x2, m_x3 - u.m_x3, m_x4 - u.m_x4, m_x5 - u.m_x5, m_x6 - u.m_x6, m_x7 - u.m_x7, m_x8 - u.m_x8, m_x9 - u.m_x9);
@@ -604,3 +605,29 @@ public:
 		);
 	}
 };
+
+inline Vector9 operator*(const Vector9& v, const Matrix9x9& H)
+{
+	Matrix9x9 HT{ H.trans() };
+	return Vector9(
+		v.dotP(HT.getRow(0)),
+		v.dotP(HT.getRow(1)),
+		v.dotP(HT.getRow(2)),
+		v.dotP(HT.getRow(3)),
+		v.dotP(HT.getRow(4)),
+		v.dotP(HT.getRow(5)),
+		v.dotP(HT.getRow(6)),
+		v.dotP(HT.getRow(7)),
+		v.dotP(HT.getRow(8))
+	);
+}
+
+inline Vector3 operator*(const Vector3& v, const Matrix3x3& H)
+{
+	Matrix3x3 HT{ H.trans() };
+	return Vector3(
+		v.dotP(HT.getRow(0)),
+		v.dotP(HT.getRow(1)),
+		v.dotP(HT.getRow(2))
+	);
+}

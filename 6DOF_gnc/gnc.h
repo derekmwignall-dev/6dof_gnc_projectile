@@ -81,7 +81,7 @@ public:
 		Vector3 v{ tgt_vel - missileVel };
 
 		double Vc{ -r.normalize().dotP(v) };
-		if (Vc <= 0.0) return Vector3{ 0.0, 0.0, 0.0 };
+		//if (Vc <= 0.0) return Vector3{ 0.0, 0.0, 0.0 };
 
 		double t_go{ r.magnitude() / Vc };
 		//if (t_go < 0.3) return Vector3{ 0.0, 0.0, 0.0 };

@@ -10,11 +10,15 @@ private:
 	Matrix9x9 m_processNoise;				// process noise covariance
 	Matrix3x3 m_measurementNoise;			// measurement noise covariance
 	Matrix3x9 m_measurementMatrix;			// measurement matrix (maps state to measurement space)
+
+	// Innovation diagnostics (populated each update step)
+	Vector3   m_innovation;					// pre-fit residual: y = z - H*x⁻
+	Matrix3x3 m_innovationCov;				// innovation covariance: S = H*P⁻*Hᵀ + R
 public:
 	KalmanFilter(const Vector9& initialState, const Matrix9x9& covariance, const Matrix9x9& covariance_pred, const Matrix9x9& processNoise, const Matrix3x3& measurementNoise, const Matrix3x9& measurementMatrix)
 		: m_state{ initialState }, m_covariance{ covariance }, m_covariance_pred{ covariance_pred }, m_processNoise{ processNoise }, m_measurementNoise{ measurementNoise }, m_measurementMatrix{ measurementMatrix } {
 	}
-	void setR( Matrix3x3& R) { m_measurementNoise = R; }
+	void setR(Matrix3x3& R) { m_measurementNoise = R; }
 
 	Matrix9x9 systemsDynamics(const double& dt) const
 	{
@@ -40,14 +44,39 @@ public:
 
 	void update(const Vector3& measurement)
 	{
-		Matrix9x3 gain{ m_covariance_pred * m_measurementMatrix.trans() *
-						(m_measurementMatrix * m_covariance_pred * m_measurementMatrix.trans() + m_measurementNoise).inv() };
-		m_state = m_state + gain * (measurement - m_measurementMatrix * m_state);
+		// Pre-fit residual (innovation) — computed against the prior x⁻, before update
+		m_innovation = measurement - m_measurementMatrix * m_state;  // y = z - H*x⁻
+
+		// Innovation covariance S = H*P⁻*Hᵀ + R
+		m_innovationCov = m_measurementMatrix * m_covariance_pred * m_measurementMatrix.trans() + m_measurementNoise;
+
+		// Gate: reject if innovation is too large
+		// Chi-squared threshold for 3 DOF at 99.9% = 16.27
+		Matrix3x3 S_inv{ m_innovationCov.inv() };
+		double mahal{ (m_innovation * S_inv).dotP(m_innovation) }; // eᵀS⁻¹e
+		if (mahal > 16.27) return; // skip this measurement
+
+		// Kalman gain K = P⁻*Hᵀ * S⁻¹
+		Matrix9x3 gain{ m_covariance_pred * m_measurementMatrix.trans() * m_innovationCov.inv() };
+
+		// State update
+		m_state = m_state + gain * m_innovation;
+
+		// Joseph-form covariance update (pre-existing, numerically stable)
 		Matrix9x9 identity{};
 		Matrix9x9 P1{ identity - gain * m_measurementMatrix };
-		Matrix9x9 S{gain * m_measurementNoise * gain.trans()};
+		Matrix9x9 S{ gain * m_measurementNoise * gain.trans() };
 		m_covariance = P1 * m_covariance_pred * P1.trans() + S; // P_post
 	}
 
-	Vector9 getState() const { return m_state; }
+	Vector9   getState()          const { return m_state; }
+	Vector3   getInnovation()     const { return m_innovation; }     // y = z - H*x⁻  [ft]
+	Matrix3x3 getInnovationCov()  const { return m_innovationCov; }  // S = H*P⁻*Hᵀ + R
+
+	double computeNEES(const Vector9& true_state) // Normalized estimated error square (NEES) 
+	{
+		Vector9 error{ true_state - m_state };
+		
+		return { (error * m_covariance.inv()).dotP(error) };
+	}
 };
